@@ -1,0 +1,228 @@
+---
+title: "linear_models"
+author: "Xiaoyu Wu"
+date: "2023-11-05"
+output: github_document
+---
+
+```{r}
+library(tidyverse)
+library(p8105.datasets)
+
+set.seed(1)
+```
+
+## Model fitting
+#### Import data
+```{r}
+data("nyc_airbnb")
+
+nyc_airbnb = 
+  nyc_airbnb %>% 
+  mutate(stars = review_scores_location / 2) %>% 
+  rename(
+    borough = neighbourhood_group,
+    neighborhood = neighbourhood) %>% 
+  filter(borough != "Staten Island") %>% 
+  select(price, stars, borough, neighborhood, room_type)
+```
+#### fit a model 
+```{r}
+fit = lm(price ~ stars + borough, data = nyc_airbnb)
+# stars is a numeric predictor and borough is a categorical predictor. 
+# different boroughs have paralleled lines 
+```
+
+```{r}
+nyc_airbnb = 
+  nyc_airbnb %>% 
+  mutate(
+    borough = fct_infreq(borough),
+    room_type = fct_infreq(room_type))
+
+fit = lm(price ~ stars + borough, data = nyc_airbnb)
+```
+Let's look at the result 
+```{r}
+summary(fit)
+summary(fit)$coef
+coef(fit)
+residuals(fit)
+fitted.values(fit)
+```
+## Tidying output
+Let's look at the result better 
+```{r}
+fit %>% 
+  broom::glance()
+```
+
+```{r}
+fit %>% 
+  broom::tidy()
+```
+
+```{r}
+fit %>% 
+  broom::tidy() %>% 
+  select(term, estimate, p.value) %>% 
+  mutate(term = str_replace(term, "^borough", "Borough: ")) %>% 
+  knitr::kable(digits = 3)
+```
+## Be in control of factors 
+```{r}
+nyc_airbnb = 
+  nyc_airbnb %>% 
+  mutate(
+    borough = fct_infreq(borough),
+# in order of frequency of borough 
+    room_type = fct_infreq(room_type))
+
+fit = lm(price ~ stars + borough, data = nyc_airbnb)
+```
+Look at that plot again
+```{r}
+nyc_airbnb |> 
+  ggplot(aes(x=stars,y=price,color=borough))+
+  geom_point()
+```
+
+```{r}
+fit = lm(price ~ stars + borough, data = nyc_airbnb)
+broom::tidy(fit)
+broom::glance(fit)
+```
+
+
+## Diagnostics
+```{r}
+modelr::add_residuals(nyc_airbnb, fit)
+# ask for data and model fit in the brackets  
+```
+
+```{r}
+modelr::add_predictions(nyc_airbnb, fit)
+```
+
+```{r}
+nyc_airbnb %>% 
+  modelr::add_residuals(fit) %>% 
+  ggplot(aes(x = borough, y = resid)) + geom_violin()+
+  ylim(-500,1500)
+```
+
+```{r}
+nyc_airbnb %>% 
+  modelr::add_residuals(fit) %>% 
+  ggplot(aes(x = stars, y = resid)) + 
+  geom_point() +
+  facet_wrap(.~borough)
+  
+```
+
+## Hypothesis testing
+This does t-test by default
+```{r}
+fit |> 
+  broom::tidy()
+```
+
+what about significance of `borough` 
+```{r}
+fit_null = lm(price ~ stars, data = nyc_airbnb)
+fit_alt = lm(price ~ stars + borough, data = nyc_airbnb)
+```
+
+```{r}
+anova(fit_null, fit_alt) %>% 
+  broom::tidy()
+```
+
+## Nesting data, fit models 
+This is pretty formal and also complex 
+```{r}
+nyc_airbnb %>% 
+  lm(price ~ stars * borough + room_type * borough, data = .) %>% 
+  broom::tidy() %>% 
+  knitr::kable(digits = 3)
+```
+This is more exploratory and easier to understand 
+```{r}
+nest_lm_res =
+  nyc_airbnb %>% 
+  nest(data = -borough) %>% 
+# nest everything except borough 
+  mutate(
+    models = map(.x=data, ~lm(price ~ stars + room_type, data = .x)),
+    results = map(models, broom::tidy)) %>% 
+# add a result column 
+  select(-data, -models) %>% 
+  unnest(results) %>%
+  filter(term!="(Intercept)")
+```
+
+```{r}
+nest_lm_res %>% 
+  select(borough, term, estimate) %>% 
+  mutate(term = fct_inorder(term)) %>% 
+  pivot_wider(
+    names_from = term, values_from = estimate) %>% 
+  knitr::kable(digits = 3)
+```
+Let's nest even more 
+```{r}
+manhattan_airbnb =
+  nyc_airbnb %>% 
+  filter(borough == "Manhattan")
+
+manhattan_nest_lm_res =
+  manhattan_airbnb %>% 
+  nest(data = -neighborhood) %>% 
+  mutate(
+    models = map(data, ~lm(price ~ stars + room_type, data = .x)),
+    results = map(models, broom::tidy)) %>% 
+  select(-data, -models) %>% 
+  unnest(results) 
+```
+
+```{r}
+manhattan_nest_lm_res %>% 
+  filter(str_detect(term, "room_type")) %>% 
+  ggplot(aes(x = neighborhood, y = estimate)) + 
+  geom_point() + 
+  facet_wrap(~term) + 
+  theme(axis.text.x = element_text(angle = 80, hjust = 1))
+```
+
+## Binary outcomes
+```{r}
+baltimore_df = 
+  read_csv("./homicide-data.csv") %>% 
+  filter(city == "Baltimore") %>% 
+  mutate(
+    resolved = as.numeric(disposition == "Closed by arrest"),
+    victim_age = as.numeric(victim_age),
+    victim_race = fct_relevel(victim_race, "White")) %>% 
+  select(resolved, victim_age, victim_race, victim_sex)
+```
+
+```{r}
+fit_logistic = 
+  baltimore_df %>% 
+  glm(resolved ~ victim_age + victim_race + victim_sex, data = ., family = binomial()) 
+```
+
+```{r}
+fit_logistic %>% 
+  broom::tidy() %>% 
+  mutate(OR = exp(estimate)) %>%
+  select(term, log_OR = estimate, OR, p.value) %>% 
+  knitr::kable(digits = 3)
+```
+
+```{r}
+baltimore_df %>% 
+  modelr::add_predictions(fit_logistic) %>% 
+  mutate(fitted_prob = boot::inv.logit(pred))
+```
+
