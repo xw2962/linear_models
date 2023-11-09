@@ -21323,6 +21323,7 @@ manhattan_nest_lm_res =
   nest(data = -neighborhood) %>% 
   mutate(
     models = map(data, ~lm(price ~ stars + room_type, data = .x)),
+# models = map(data, \(df) lm(price ~ stars + room_type, data = df)): creating an anonymous function
     results = map(models, broom::tidy)) %>% 
   select(-data, -models) %>% 
   unnest(results) 
@@ -21365,6 +21366,7 @@ baltimore_df =
 fit_logistic = 
   baltimore_df %>% 
   glm(resolved ~ victim_age + victim_race + victim_sex, data = ., family = binomial()) 
+# fitting general linear model since the outcome is binomial here 
 ```
 
 ``` r
